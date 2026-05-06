@@ -1,0 +1,50 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - 'v*'
+
+permissions:
+    contents: write
+    packages: read
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v5
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Typecheck
+              run: bun run typecheck
+
+            - name: Build addon
+              run: bun run build
+
+            - name: Package addon
+              run: |
+                  mkdir -p release/torrent-addon
+                  cp dist/index.js dist/manifest.json release/torrent-addon/
+                  cd release
+                  zip -r torrent-addon-${{ github.ref_name }}.zip torrent-addon
+                  shasum -a 256 torrent-addon-${{ github.ref_name }}.zip > torrent-addon-${{ github.ref_name }}.zip.sha256
+
+            - name: Create GitHub Release
+              uses: softprops/action-gh-release@v2
+              with:
+                  generate_release_notes: true
+                  files: |
+                      release/torrent-addon-${{ github.ref_name }}.zip
+                      release/torrent-addon-${{ github.ref_name }}.zip.sha256
