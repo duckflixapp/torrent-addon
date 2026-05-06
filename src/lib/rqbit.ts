@@ -1,29 +1,14 @@
 import axios from 'axios';
+import type { AddonErrorFactory } from '@duckflixapp/addon-sdk';
 import type { RqbitTorrent, TorrentStats } from '../torrent.types';
-import { AppError } from '../torrent.errors';
-
-export class RqbitNewTorrentError extends AppError {
-    constructor(code: number, cause?: unknown, details?: Record<string, unknown>) {
-        super('Torrent not added.', { statusCode: code, cause, details });
-    }
-}
-
-export class RqbitStatsError extends AppError {
-    constructor(code: number) {
-        super('Torrent stats not retrieved.', { statusCode: code });
-    }
-}
-
-export class RqbitRemoveError extends AppError {
-    constructor(code: number) {
-        super('Torrent stats not retrieved.', { statusCode: code });
-    }
-}
 
 export class RqbitClient {
     private readonly api;
-    constructor(options?: { baseUrl?: string }) {
+    private readonly error: AddonErrorFactory;
+
+    constructor(options: { baseUrl?: string; error: AddonErrorFactory }) {
         const baseUrl = options?.baseUrl ?? 'http://localhost:3030';
+        this.error = options.error;
         this.api = axios.create({ baseURL: baseUrl, responseType: 'json' });
     }
 
@@ -36,8 +21,12 @@ export class RqbitClient {
             .catch((err) => {
                 const statusCode = axios.isAxiosError(err) ? (err.response?.status ?? 500) : 500;
                 const responseData = axios.isAxiosError(err) ? err.response?.data : undefined;
-                throw new RqbitNewTorrentError(statusCode, err, {
-                    responseData,
+                throw this.error('Torrent not added.', {
+                    statusCode,
+                    cause: err,
+                    details: {
+                        responseData,
+                    },
                 });
             });
         return torrent;
@@ -45,15 +34,15 @@ export class RqbitClient {
 
     public async torrentDelete(torrentId: number): Promise<void> {
         await this.api.post(`/torrents/${torrentId}/delete`).catch((err) => {
-            const statusCode = err.response?.status ?? 500;
-            throw new RqbitRemoveError(statusCode);
+            const statusCode = axios.isAxiosError(err) ? (err.response?.status ?? 500) : 500;
+            throw this.error('Torrent not removed.', { statusCode, cause: err });
         });
     }
 
     public async torrentStats(torrentId: number): Promise<TorrentStats> {
         const { data: stats } = await this.api.get<TorrentStats>(`/torrents/${torrentId}/stats/v1`).catch((err) => {
-            const statusCode = err.response?.status ?? 500;
-            throw new RqbitStatsError(statusCode);
+            const statusCode = axios.isAxiosError(err) ? (err.response?.status ?? 500) : 500;
+            throw this.error('Torrent stats not retrieved.', { statusCode, cause: err });
         });
         return stats;
     }

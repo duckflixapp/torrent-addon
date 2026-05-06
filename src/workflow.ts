@@ -1,27 +1,29 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { TorrentCanceledError, TorrentClient, validateTorrentFileSize } from './utils/torrent';
+import { isTorrentCanceledError, TorrentClient, validateTorrentFileSize } from './utils/torrent';
 import { RqbitClient } from './lib/rqbit';
-import type { DownloadProgress, VideoProcessorContext } from '@duckflixapp/addon-sdk';
-import { TorrentDownloadError, AppError } from './torrent.errors';
+import type { AddonErrorFactory, DownloadProgress, VideoProcessorContext } from '@duckflixapp/addon-sdk';
 
-export class DownloadCancelledError extends Error {
-    constructor() {
-        super('cancelled-download');
-        this.name = 'DownloadCancelledError';
-    }
-}
+const createTorrentDownloadError = (error: AddonErrorFactory, cause: unknown) => {
+    const causeDetails = cause as { message?: string; code?: string };
+    let friendlyMessage = 'Torrent could not be downloaded';
+    if (causeDetails?.message?.includes('no peers')) friendlyMessage = 'No active seeders found for this torrent.';
+    if (causeDetails?.code === 'ENOSPC') friendlyMessage = 'Not enough disk space for download.';
+
+    return error(friendlyMessage, { cause, statusCode: 400 });
+};
 
 export const processTorrentFileWorkflow = async (data: { torrentPath: string }, context: VideoProcessorContext) => {
+    const error = context.error.bind(context);
     const workDir = context.workspace?.workDir;
     if (!workDir) {
-        throw new AppError('Torrent processor requires a job workspace', { statusCode: 500 });
+        throw error('Torrent processor requires a job workspace', { statusCode: 500 });
     }
 
     let torrentBuffer: Buffer;
     try {
         const valid = await validateTorrentFileSize(data.torrentPath);
-        if (!valid) throw new Error('Torrent file is too large');
+        if (!valid) throw error('Torrent file is too large', { statusCode: 400 });
 
         torrentBuffer = await fs.readFile(data.torrentPath);
     } catch (err) {
@@ -34,7 +36,7 @@ export const processTorrentFileWorkflow = async (data: { torrentPath: string }, 
     await fs.mkdir(downloadPath, { recursive: true });
 
     const rqbitUrl = process.env.RQBIT_URL ?? 'http://localhost:3030';
-    const torrentClient = new TorrentClient({ rqbit: new RqbitClient({ baseUrl: rqbitUrl }) });
+    const torrentClient = new TorrentClient({ rqbit: new RqbitClient({ baseUrl: rqbitUrl, error }), error });
     const torrent = await torrentClient.download(torrentBuffer, { outputFolder: workDir }).catch((e) => {
         context.emit({
             type: 'log',
@@ -46,7 +48,7 @@ export const processTorrentFileWorkflow = async (data: { torrentPath: string }, 
                 err: e,
             },
         });
-        throw new TorrentDownloadError(e);
+        throw createTorrentDownloadError(error, e);
     });
     const torrentDirPath = path.join(workDir, torrent.dir);
     context.download.register(torrent);
@@ -89,16 +91,16 @@ export const processTorrentFileWorkflow = async (data: { torrentPath: string }, 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
         fs.rm(torrentDirPath, { recursive: true, force: true }).catch(() => {});
-        if (err instanceof TorrentCanceledError) {
+        if (isTorrentCanceledError(err)) {
             context.emit({
                 type: 'status',
                 status: 'canceled',
                 title: `Video download canceled`,
                 message: `Torrent download was canceled.`,
             });
-            throw new DownloadCancelledError();
+            throw err;
         }
-        throw new TorrentDownloadError(err);
+        throw createTorrentDownloadError(error, err);
     } finally {
         context.download.unregister();
     }
@@ -113,7 +115,7 @@ export const processTorrentFileWorkflow = async (data: { torrentPath: string }, 
     } catch (e) {
         await fs.rm(torrentDirPath, { recursive: true, force: true }).catch(() => {});
         torrent.destroy().catch(() => {});
-        throw new AppError('Error changing video status and notifying', { cause: e });
+        throw error('Error changing video status and notifying', { cause: e });
     }
 
     let safePath, mainFile;
@@ -125,7 +127,7 @@ export const processTorrentFileWorkflow = async (data: { torrentPath: string }, 
         safePath = path.join(downloadPath, `${crypto.randomUUID()}-torrent${ext}`);
         await fs.rename(downloadedPath, safePath);
     } catch (e) {
-        throw new AppError('Video could not be copied after downloading', { cause: e });
+        throw error('Video could not be copied after downloading', { cause: e });
     } finally {
         await fs.rm(torrentDirPath, { recursive: true, force: true }).catch(() => {});
         torrent.destroy().catch(() => {}); // ignore error

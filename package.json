@@ -8,10 +8,10 @@
         "prettier": "3.8.3"
     },
     "peerDependencies": {
-        "typescript": "^5"
+        "typescript": "^5.9.3"
     },
     "dependencies": {
-        "@duckflixapp/addon-sdk": "0.0.1",
+        "@duckflixapp/addon-sdk": "0.1.2",
         "axios": "^1.16.0"
     }
 }

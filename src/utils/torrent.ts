@@ -1,29 +1,21 @@
 import fs from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
-import type { DownloadProgress } from '@duckflixapp/addon-sdk';
+import type { AddonErrorFactory, DownloadProgress } from '@duckflixapp/addon-sdk';
 import type { RqbitClient } from '../lib/rqbit';
-import { AppError } from '../torrent.errors';
 import type { RqbitTorrent, TorrentStats } from '../torrent.types';
 
 const defaultMaxSize = 1024 * 1024 * 2; // 2MB
+const torrentCanceledCode = 'TORRENT_DOWNLOAD_CANCELED';
+
 export const validateTorrentFileSize = async (torrentPath: string, maxSize: number = defaultMaxSize) => {
     const stats = await fs.stat(torrentPath);
 
     return stats.size < maxSize;
 };
 
-class TorrentError extends AppError {
-    constructor(name: string, err?: unknown) {
-        super(name, { statusCode: 500, cause: err });
-    }
-}
-
-export class TorrentCanceledError extends AppError {
-    constructor() {
-        super('Torrent download canceled', { statusCode: 499 });
-    }
-}
+export const isTorrentCanceledError = (err: unknown) =>
+    typeof err === 'object' && err !== null && 'code' in err && (err as { code?: unknown }).code === torrentCanceledCode;
 
 export class Torrent extends EventEmitter {
     private timeoutId: NodeJS.Timeout | null = null;
@@ -72,7 +64,9 @@ export class Torrent extends EventEmitter {
 
     public async waitDownload(): Promise<void> {
         return new Promise((resolve, reject) => {
-            if (this.timeoutId) return reject(new Error('Already waiting download for this torrent'));
+            if (this.timeoutId) {
+                return reject(this.client.createError('Already waiting download for this torrent', { statusCode: 500 }));
+            }
             this.waitReject = reject;
 
             let errorCount = 0;
@@ -103,14 +97,14 @@ export class Torrent extends EventEmitter {
                         this.stopTracking();
                         this.waitReject = null;
                         const error = stats.error ? new Error(stats.error) : undefined;
-                        return reject(new TorrentError('rqbit reported a torrent error', error));
+                        return reject(this.client.createError('rqbit reported a torrent error', { statusCode: 500, cause: error }));
                     }
 
                     this.timeoutId = setTimeout(timeout, 1000);
                 } catch (err) {
                     this.stopTracking();
                     this.waitReject = null;
-                    reject(new TorrentError('unexpected torrent error', err));
+                    reject(this.client.createError('unexpected torrent error', { statusCode: 500, cause: err }));
                 }
             };
 
@@ -135,7 +129,15 @@ export class Torrent extends EventEmitter {
             reject?.(err);
             throw err;
         }
-        reject?.(new TorrentCanceledError());
+        reject?.(
+            Object.assign(
+                this.client.createError('Torrent download canceled', {
+                    statusCode: 499,
+                    details: { code: torrentCanceledCode },
+                }),
+                { code: torrentCanceledCode }
+            )
+        );
     }
 
     public async destroy() {
@@ -149,8 +151,15 @@ export class Torrent extends EventEmitter {
 
 export class TorrentClient {
     private readonly rqbit;
-    constructor(options: { rqbit: RqbitClient }) {
+    private readonly error: AddonErrorFactory;
+
+    constructor(options: { rqbit: RqbitClient; error: AddonErrorFactory }) {
         this.rqbit = options.rqbit;
+        this.error = options.error;
+    }
+
+    public createError(...args: Parameters<AddonErrorFactory>) {
+        return this.error(...args);
     }
 
     public async download(torrentFile: Buffer, options?: { outputFolder?: string }) {
