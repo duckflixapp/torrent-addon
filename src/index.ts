@@ -27,7 +27,6 @@ export const torrentProcessor = videoProcessor({
 
     async identify({ source }) {
         if (source.sourceType !== 'file') return null;
-
         return null;
     },
 

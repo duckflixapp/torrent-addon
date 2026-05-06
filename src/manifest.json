@@ -5,7 +5,7 @@
     "runtime": "bun",
     "entry": "index.ts",
     "description": "Duckflix torrent video processor addon.",
-    "permissions": ["filesystem:job", "p2p"],
+    "permissions": ["network", "filesystem:job", "p2p"],
     "capabilities": [
         {
             "kind": "video.processor",

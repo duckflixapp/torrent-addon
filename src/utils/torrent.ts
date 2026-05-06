@@ -153,8 +153,8 @@ export class TorrentClient {
         this.rqbit = options.rqbit;
     }
 
-    public async download(torrentFile: Buffer) {
-        const data = await this.rqbit.torrentDownload(torrentFile);
+    public async download(torrentFile: Buffer, options?: { outputFolder?: string }) {
+        const data = await this.rqbit.torrentDownload(torrentFile, options);
         const torrent = new Torrent(this, data);
         return torrent;
     }

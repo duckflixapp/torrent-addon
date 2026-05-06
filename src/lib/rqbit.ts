@@ -3,8 +3,8 @@ import type { RqbitTorrent, TorrentStats } from '../torrent.types';
 import { AppError } from '../torrent.errors';
 
 export class RqbitNewTorrentError extends AppError {
-    constructor(code: number) {
-        super('Torrent not added.', { statusCode: code });
+    constructor(code: number, cause?: unknown, details?: Record<string, unknown>) {
+        super('Torrent not added.', { statusCode: code, cause, details });
     }
 }
 
@@ -22,20 +22,23 @@ export class RqbitRemoveError extends AppError {
 
 export class RqbitClient {
     private readonly api;
-    constructor(options?: { baseUrl: string }) {
+    constructor(options?: { baseUrl?: string }) {
         const baseUrl = options?.baseUrl ?? 'http://localhost:3030';
         this.api = axios.create({ baseURL: baseUrl, responseType: 'json' });
     }
 
-    public async torrentDownload(torrentFile: Buffer): Promise<RqbitTorrent> {
+    public async torrentDownload(torrentFile: Buffer, options?: { outputFolder?: string }): Promise<RqbitTorrent> {
         const { data: torrent } = await this.api
             .post<RqbitTorrent>(`/torrents`, torrentFile, {
-                params: { overwrite: true },
+                params: { overwrite: true, output_folder: options?.outputFolder },
                 headers: { 'Content-Type': 'application/x-bittorrent' },
             })
             .catch((err) => {
-                const statusCode = err.response?.status ?? 500;
-                throw new RqbitNewTorrentError(statusCode);
+                const statusCode = axios.isAxiosError(err) ? (err.response?.status ?? 500) : 500;
+                const responseData = axios.isAxiosError(err) ? err.response?.data : undefined;
+                throw new RqbitNewTorrentError(statusCode, err, {
+                    responseData,
+                });
             });
         return torrent;
     }

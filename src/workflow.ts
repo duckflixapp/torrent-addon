@@ -5,9 +5,6 @@ import { RqbitClient } from './lib/rqbit';
 import type { DownloadProgress, VideoProcessorContext } from '@duckflixapp/addon-sdk';
 import { TorrentDownloadError, AppError } from './torrent.errors';
 
-const rqbitClient = new RqbitClient({ baseUrl: process.env.RQBIT_URL! });
-const torrentClient = new TorrentClient({ rqbit: rqbitClient });
-
 export class DownloadCancelledError extends Error {
     constructor() {
         super('cancelled-download');
@@ -16,6 +13,11 @@ export class DownloadCancelledError extends Error {
 }
 
 export const processTorrentFileWorkflow = async (data: { torrentPath: string }, context: VideoProcessorContext) => {
+    const workDir = context.workspace?.workDir;
+    if (!workDir) {
+        throw new AppError('Torrent processor requires a job workspace', { statusCode: 500 });
+    }
+
     let torrentBuffer: Buffer;
     try {
         const valid = await validateTorrentFileSize(data.torrentPath);
@@ -28,13 +30,25 @@ export const processTorrentFileWorkflow = async (data: { torrentPath: string }, 
         await fs.unlink(data.torrentPath).catch(() => {});
     }
 
-    const downloadPath = path.join(context.workspace?.workDir!, './downloads');
+    const downloadPath = path.join(workDir, './downloads');
     await fs.mkdir(downloadPath, { recursive: true });
 
-    const torrent = await torrentClient.download(torrentBuffer).catch((e) => {
-        throw new Error(e);
+    const rqbitUrl = process.env.RQBIT_URL ?? 'http://localhost:3030';
+    const torrentClient = new TorrentClient({ rqbit: new RqbitClient({ baseUrl: rqbitUrl }) });
+    const torrent = await torrentClient.download(torrentBuffer, { outputFolder: workDir }).catch((e) => {
+        context.emit({
+            type: 'log',
+            level: 'error',
+            message: 'Torrent could not be added to rqbit',
+            data: {
+                rqbitUrl,
+                workDir,
+                err: e,
+            },
+        });
+        throw new TorrentDownloadError(e);
     });
-    const torrentDirPath = path.join(context.workspace?.workDir!, torrent.dir);
+    const torrentDirPath = path.join(workDir, torrent.dir);
     context.download.register(torrent);
 
     torrent.addListener('progress', (progress) =>
