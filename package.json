@@ -1,0 +1,17 @@
+{
+    "name": "torrent-addon",
+    "module": "src/index.ts",
+    "type": "module",
+    "private": true,
+    "devDependencies": {
+        "@types/bun": "latest",
+        "prettier": "3.8.3"
+    },
+    "peerDependencies": {
+        "typescript": "^5"
+    },
+    "dependencies": {
+        "@duckflixapp/addon-sdk": "0.0.1",
+        "axios": "^1.16.0"
+    }
+}
