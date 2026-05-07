@@ -3,9 +3,12 @@ import type {
     AddonErrorFactory,
     PreparedVideoProcessorSource,
     RawVideoProcessorSource,
+    VideoProcessorContext,
+    VideoProcessorScanInput,
+    VideoProcessorScanItem,
     VideoProcessorStartOutput,
 } from '@duckflixapp/addon-sdk';
-import { processTorrentFileWorkflow } from './workflow';
+import { processTorrentFileWorkflow, scanTorrentFileWorkflow } from './workflow';
 
 type PreparedFileVideoProcessorSource = Extract<PreparedVideoProcessorSource, { sourceType: 'file' }>;
 
@@ -66,13 +69,32 @@ export const torrentProcessor = videoProcessor({
             throw context.error('The "torrent" field must contain a .torrent file.', { statusCode: 400 });
         }
     },
-    start: async ({ source }, context): Promise<VideoProcessorStartOutput> => {
+
+    scan: async (
+        { source, dbUrl, requestedType }: VideoProcessorScanInput,
+        context: VideoProcessorContext
+    ): Promise<VideoProcessorScanItem[]> => {
         const error = context.error.bind(context);
         validateTorrentSource(source, error);
 
-        const { name, path, size } = await processTorrentFileWorkflow({ torrentPath: source.tempPath }, context);
+        const scan = await scanTorrentFileWorkflow({ torrentPath: source.tempPath }, context);
 
-        return { fileName: name, fileSize: size, path };
+        return scan.files.map((file) => ({
+            id: `torrent:${scan.infoHash}:${file.torrentIndex}`,
+            source,
+            requestedType: requestedType,
+            title: file.name || scan.name,
+            metadata: null,
+        }));
+    },
+
+    start: async ({ source, items }, context): Promise<VideoProcessorStartOutput> => {
+        const error = context.error.bind(context);
+        validateTorrentSource(source, error);
+
+        const videos = await processTorrentFileWorkflow({ torrentPath: source.tempPath, items }, context);
+
+        return videos;
     },
 });
 

@@ -32,11 +32,16 @@ export class Torrent extends EventEmitter {
         return this.data.id;
     }
 
-    public get dir() {
-        const rqbitPath = this.data.output_folder;
-        const folderName = path.basename(rqbitPath);
+    public get infoHash() {
+        return this.data.details.info_hash;
+    }
 
-        return path.join(folderName);
+    public get name() {
+        return this.data.details.name;
+    }
+
+    public get outputFolder() {
+        return this.data.output_folder;
     }
 
     public get files() {
@@ -162,7 +167,7 @@ export class TorrentClient {
         return this.error(...args);
     }
 
-    public async download(torrentFile: Buffer, options?: { outputFolder?: string }) {
+    public async download(torrentFile: Buffer, options?: { outputFolder?: string; overwrite?: boolean }) {
         const data = await this.rqbit.torrentDownload(torrentFile, options);
         const torrent = new Torrent(this, data);
         return torrent;

@@ -12,10 +12,10 @@ export class RqbitClient {
         this.api = axios.create({ baseURL: baseUrl, responseType: 'json' });
     }
 
-    public async torrentDownload(torrentFile: Buffer, options?: { outputFolder?: string }): Promise<RqbitTorrent> {
+    public async torrentDownload(torrentFile: Buffer, options?: { overwrite?: boolean; outputFolder?: string }): Promise<RqbitTorrent> {
         const { data: torrent } = await this.api
             .post<RqbitTorrent>(`/torrents`, torrentFile, {
-                params: { overwrite: true, output_folder: options?.outputFolder },
+                params: { overwrite: options?.overwrite ?? false, output_folder: options?.outputFolder },
                 headers: { 'Content-Type': 'application/x-bittorrent' },
             })
             .catch((err) => {
