@@ -19,5 +19,5 @@
         "@duckflixapp/addon-sdk": "0.2.1",
         "axios": "^1.16.0"
     },
-    "version": "0.0.1"
+    "version": "0.1.0"
 }
